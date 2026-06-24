@@ -1,0 +1,271 @@
+echo both
+
+atom_style      granular
+atom_modify     map array
+
+dimension		3
+boundary        f f f
+newton          off
+communicate     single vel yes
+units           si
+#soft_particles 	yes
+
+# Simulation box
+region          reg block -1.5 1.5 -1.0 2.5 -1.5 1.5 units box
+create_box      2 reg
+
+group			particles type 2
+group			all_gran region reg
+
+# Gravity: z is vertical (downwards)
+fix             integrator all nve/sphere
+fix             grav all gravity 9.81 vector 0 0 -1
+
+# Neighbor settings
+neighbor        0.03 bin
+neigh_modify    delay 0
+
+#####################################################################
+################### General Simulation Parameters ###################
+# Time Control
+variable dt       equal 1.0e-5
+timestep          ${dt}
+
+variable        t           equal step*${dt}
+
+variable        dumpstep    equal 0.010/${dt}   # write VTK every 0.01 s
+variable        thermostep  equal 0.001/${dt}   # thermo every 0.001 s
+
+
+# Filling + settling time (total) and discharge time
+variable        t_fill_total    equal 6.0       # [s] (fill + settle)
+variable        t_discharge     equal 10.0      # [s]
+
+# Inlet mass flow and target filling mass
+variable        massrate_in     equal 55.0      # [kg/s]
+variable        fillmass        equal 190.0     # [kg]
+
+# Time needed to insert 190 kg at 55 kg/s
+variable        t_fill          equal ${fillmass}/${massrate_in}
+variable        t_settle        equal ${t_fill_total}-${t_fill}
+
+# Convert times to integer timesteps
+variable n_fill       equal floor(${t_fill}/${dt})
+variable n_settle     equal floor(${t_settle}/${dt})
+variable n_discharge  equal floor(${t_discharge}/${dt})
+
+# Rayleigh time check
+fix             ts_check all check/timestep/gran ${dumpstep} 0.1 0.1
+
+####################################################################
+################ Contact model and contact parameters ##############
+
+# Young's modulus (same for wall and particles)
+variable        ym_wall     equal 1.0e7
+variable        ym_part     equal 1.0e7
+
+# Friction coefficients
+# wall-wall, wall-particle, particle-wall, particle-particle
+variable        mu_pp       equal 0.2    # particle-particle
+variable        mu_pw       equal 0.5    # particle-wall
+variable        mu_ww       equal 0.0    # wall-wall
+
+# Rolling friction (same for p-p and p-w)
+variable        rf_pp       equal 0.8
+variable        rf_pw       equal 0.8
+variable        rf_ww       equal 0.0
+
+# Restitution (all 0.2)
+variable        cor         equal 0.2
+
+# Global material properties
+fix  m1 all property/global youngsModulus peratomtype      ${ym_wall} ${ym_part}
+fix  m2 all property/global poissonsRatio peratomtype      0.3       0.3
+
+# Restitution matrix (2x2)
+fix  m3 all property/global coefficientRestitution peratomtypepair 2 ${cor} ${cor} ${cor} ${cor}
+
+# Sliding friction matrix (2x2)
+# [ww, wp; pw, pp]
+fix  m4 all property/global coefficientFriction peratomtypepair 2 ${mu_ww} ${mu_pw} ${mu_pw} ${mu_pp}
+
+# Rolling friction matrix (2x2)
+fix  m5 all property/global coefficientRollingFriction peratomtypepair 2 ${rf_ww} ${rf_pw} ${rf_pw} ${rf_pp}
+
+# Pair style
+pair_style      gran model hertz tangential history rolling_friction epsd2
+pair_coeff      * *
+
+###################################################################
+############################## GEOMETRY ###########################
+# Static walls
+fix hopper all mesh/surface file hopper_open.stl  type 1 element_exclusion_list read hopper_excl.txt scale 0.001 curvature_tolerant yes
+fix funnel1 all mesh/surface file funnel1.stl type 1 scale 0.001 
+fix funnel2 all mesh/surface file funnel2.stl type 1 scale 0.001 
+
+# Rotor as static wall in phase 1  (NO rotation yet)
+fix rotor all mesh/surface/stress file rotor.stl type 1 scale 0.001 curvature_tolerant yes
+
+# Wall/particle contacts (phase 1)
+fix walls all wall/gran model hertz tangential history mesh n_meshes 4 meshes hopper funnel1 funnel2 rotor
+
+# Inlet surface used for particle insertion
+fix particle_in all mesh/surface/planar file inlet_planar.stl type 1 scale 0.001 curvature 1.0 curvature_tolerant yes
+		  
+###################################################################
+########################## PARTICLES ##############################
+# Particle Parameters
+variable dens        equal 3200.0     # particle density [kg/m^3]
+
+# Particle radii [m]
+variable r1  equal 0.011
+variable r2  equal 0.010
+variable r3  equal 0.008
+variable r4  equal 0.00625
+variable r5  equal 0.00560
+variable r6  equal 0.0050
+
+# Distribution weights
+variable frac_r1   equal 0.002222
+variable frac_r2   equal 0.078889
+variable frac_r3   equal 0.293333
+variable frac_r4   equal 0.175556
+variable frac_r5   equal 0.335556
+variable frac_r6   equal 0.114444
+
+group sphere region reg
+
+# Particle templates
+fix p1 sphere particletemplate/sphere 15485863 atom_type 2 density constant ${dens} radius constant ${r1}
+fix p2 sphere particletemplate/sphere 15485867 atom_type 2 density constant ${dens} radius constant ${r2}
+fix p3 sphere particletemplate/sphere 32452843 atom_type 2 density constant ${dens} radius constant ${r3}
+fix p4 sphere particletemplate/sphere 32452867 atom_type 2 density constant ${dens} radius constant ${r4}
+fix p5 sphere particletemplate/sphere 49979687 atom_type 2 density constant ${dens} radius constant ${r5}
+fix p6 sphere particletemplate/sphere 49979693 atom_type 2 density constant ${dens} radius constant ${r6}
+
+# Distribution of templates
+fix pdd sphere particledistribution/discrete 67867967 6 p1 ${frac_r1} p2 ${frac_r2} p3 ${frac_r3} p4 ${frac_r4} p5 ${frac_r5} p6 ${frac_r6}
+
+# Inlet inclination beta = 10° (H-01)
+variable        beta    equal 10.0
+# Choose an inlet velocity magnitude
+variable        v_in    equal 3.5
+
+# Example: particles move mainly in +z with small downward y-component
+variable        viny    equal  ${v_in}*sin(PI*${beta}/180)
+variable        vinz    equal  -${v_in}*cos(PI*${beta}/180)
+
+# Particle insertion
+fix ins sphere insert/stream seed 86028121 distributiontemplate pdd &
+     mass 190 massrate ${massrate_in} all_in yes vel constant 0 ${viny} ${vinz} overlapcheck yes &
+     insertion_face particle_in extrude_length 1
+
+###################################################################
+########################### OUTPUT ################################
+
+shell           mkdir post
+shell           mkdir measurements
+
+# Particle dump
+dump    dmp_particles sphere custom/vtk ${dumpstep} post/dump_particles*.vtk id type x y z vx vy vz fx fy fz omegax omegay omegaz radius
+
+# Walls dump (static geometry, for visualisation)
+dump    dmp_walls all mesh/stl ${dumpstep} post/dump_walls*.stl hopper funnel1 funnel2 rotor particle_in
+
+dump_modify dmp_particles every ${dumpstep} first yes
+dump_modify dmp_walls     every ${dumpstep} first yes
+
+# Mass Flow measurements
+# Mass flow at inlet surface
+fix massflow_in all massflow/mesh mesh particle_in vec_side 0 0 1
+variable m_in_total equal f_massflow_in[1]
+variable m_in_rate  equal f_massflow_in[3]
+fix print_m_in all print ${dumpstep} "${t},${m_in_total},${m_in_rate}" file measurements/massflow_inlet.csv title "t,totalmass,massrate" screen no
+
+# Mass flow above rotary valve
+fix rotary_plane all mesh/surface/planar file rotary_planar.stl type 1 scale 0.001
+
+fix massflow_rotary all massflow/mesh mesh rotary_plane vec_side 0 0 -1
+variable m_rotary_total equal f_massflow_rotary[1]
+variable m_rotary_rate  equal f_massflow_rotary[3]
+fix print_m_rotary all print ${dumpstep} "${t},${m_rotary_total},${m_rotary_rate}" file measurements/massflow_rotary.csv title "t,totalmass,massrate" screen no
+
+# Mass flow at outlet
+fix outlet_plane all mesh/surface/planar file outlet_planar.stl type 1 scale 0.001
+
+fix massflow_out all massflow/mesh mesh outlet_plane vec_side 0 0 -1
+variable m_out_total equal f_massflow_out[1]
+variable m_out_rate  equal f_massflow_out[3]
+fix print_m_out all print ${dumpstep} "${t},${m_out_total},${m_out_rate}" file measurements/massflow_outlet.csv title "t,totalmass,massrate" screen no
+
+###################################################################
+########## FILLING, SETTLING, DISCHARGE, AND OUTPUT ###############
+## PHASE 1 = FILLING AND SETTLING (ROTOR STATIC)
+
+thermo_style    custom time step atoms spcpu cpu
+thermo          ${thermostep}
+thermo_modify   lost ignore norm no
+
+# Small initial run to initialise contact detection
+run 1
+
+# Rotor impact forces during filling
+variable Fx equal f_rotor[1]
+variable Fy equal f_rotor[2]
+variable Fz equal f_rotor[3]
+
+fix print_rotor_fill all print ${dumpstep} "${t},${Fx},${Fy},${Fz}" file measurements/rotor_forces_filling.csv title "time,Fx,Fy,Fz" screen no
+
+# Filling phase: insert particles for t_fill seconds
+print "=== PHASE 1a: Filling for ${t_fill} s ==="
+run ${n_fill}
+
+# Stop insertion, let particles settle for t_settle seconds
+print "=== PHASE 1b: Settling for ${t_settle} s ==="
+unfix ins
+run ${n_settle}
+
+## PHASE 2 = DISCHARGE WITH ROTATING ROTOR
+# End geometry dump
+undump dmp_walls
+
+# Remove static rotor-wall coupling and re-define rotor as rotating/stress wall
+unfix walls
+unfix rotor
+unfix print_rotor_fill
+
+# Rotor Center
+variable Xc equal 0.0006175
+variable Yc equal 0.0
+variable Zc equal -0.300
+
+# 20 rpm -> rad/s
+variable omega_rot equal 20.0*2*PI/60.0
+
+# 1. Load the mesh (Static definition, NO surface velocity)
+fix rotor all mesh/surface/stress file rotor.stl type 1 scale 0.001 curvature_tolerant yes reference_point ${Xc} ${Yc} ${Zc}
+
+# 2. Move the mesh (Physical rotation)
+fix mov_rotor all move/mesh mesh rotor rotate origin ${Xc} ${Yc} ${Zc} axis 1 0 0 period 3.0
+
+# 3. Wall Contact (Same as before, just ensure it references 'rotor')
+fix walls2 all wall/gran model hertz tangential history mesh n_meshes 4 meshes hopper funnel1 funnel2 rotor
+
+# Rotor forces and torque
+variable Fx_rot equal f_rotor[1]
+variable Fy_rot equal f_rotor[2]
+variable Fz_rot equal f_rotor[3]
+variable Mx_rot equal f_rotor[4]
+variable My_rot equal f_rotor[5]
+variable Mz_rot equal f_rotor[6]
+
+fix print_rotor all print ${dumpstep} "${t},${Fx_rot},${Fy_rot},${Fz_rot},${Mx_rot},${My_rot},${Mz_rot}" file measurements/rotor_forces_torques.csv title "time,Fx,Fy,Fz,Mx,My,Mz" screen no
+
+# Phase-2 walls dump including moving rotor
+dump dmp_walls2 all mesh/stl ${dumpstep} post/dump_walls2*.stl hopper funnel1 funnel2 rotor
+dump_modify dmp_walls2 every ${dumpstep} first yes
+
+print "=== PHASE 2: Discharge for ${t_discharge} s with rotating rotor ==="
+run ${n_discharge}
+
+print "=== Simulation finished ==="
