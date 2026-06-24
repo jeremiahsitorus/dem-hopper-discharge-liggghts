@@ -30,7 +30,7 @@ opens and discharges the material. The simulation investigates:
 | Filling mass | ~190 kg |
 | Rotary valve speed | 20 rpm |
 | Hopper half angle α | 45° |
-| Inlet inclination β | 45° |
+| Inlet inclination β | 10° |
 
 ---
 
