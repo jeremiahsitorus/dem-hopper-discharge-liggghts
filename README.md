@@ -67,11 +67,3 @@ opens and discharges the material. The simulation investigates:
 
 **Resistance Torque and Torque Course**
 <img width="3840" height="2160" alt="torque" src="https://github.com/user-attachments/assets/464137ad-0c53-42db-a982-ec22b5b2a675" />
-
----
-
-## Course Info
-
-- Course: Discrete Element Method — WS 2025/26
-- Institution: Otto-von-Guericke-Universität Magdeburg
-- Chair of Material Handling
