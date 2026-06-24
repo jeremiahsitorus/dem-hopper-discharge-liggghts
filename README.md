@@ -37,23 +37,21 @@ opens and discharges the material. The simulation investigates:
 ## Repository Structure
 ├── hopper_discharge.lmp       # Main LIGGGHTS input script
 
-├── hopper_excl                # Exclusion zone config
+├── hopper_excl                
 
-├── geometry/
+├── funnel1.stl
 
-│   ├── funnel1.stl
+├── funnel2.stl
 
-│   ├── funnel2.stl
+├── hopper_open.stl
 
-│   ├── hopper_open.stl
+├── inlet_planar.stl
 
-│   ├── inlet_planar.stl
+├── outlet_planar.stl
 
-│   ├── outlet_planar.stl
+├── rotary_planar.stl
 
-│   ├── rotary_planar.stl
-
-│   └── rotor.stl
+│── rotor.stl
 
 ├── measurements/              # Extracted simulation data
 
